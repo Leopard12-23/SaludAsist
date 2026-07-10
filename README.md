@@ -10,7 +10,7 @@ Sistema de pre-diagnóstico médico con IA basado en reglas. El paciente marca s
 
 ## 🔗 Producción
 
-- **App integrada:** _pendiente — pegar aquí la URL de Netlify/Vercel tras el deploy_
+- **App integrada:** https://salud-asist.vercel.app/
 - **Repositorio:** este mismo repo (monorepo del equipo)
 
 ## 🧩 Quién construyó qué módulo
@@ -86,7 +86,9 @@ npx vite preview --outDir dist-integrado --port 4600   # probarlo localmente
 
 ## 📸 Capturas
 
-_Pendiente: agregar 2-3 capturas (login, evaluación de síntomas, panel de doctor) antes de la entrega._
+| Login (contenedora) | Evaluación de síntomas (Vue) | Panel de administración (Vue) |
+|---|---|---|
+| ![Login](docs/capturas/login.png) | ![Evaluación de síntomas](docs/capturas/evaluacion.png) | ![Panel de administración](docs/capturas/admin-doctores.png) |
 
 ## 📌 Limitaciones conocidas (honestas)
 
