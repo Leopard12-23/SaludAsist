@@ -1,0 +1,12 @@
+{
+  "name": "SaludAsist",
+  "short_name": "SaludAsist",
+  "description": "Sistema de pre-diagnóstico médico con IA, 100% local y privado.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8faf9",
+  "theme_color": "#0d7e6e",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
