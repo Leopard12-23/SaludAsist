@@ -1,5 +1,5 @@
-// panel-doctor.ts — módulo individual de Alex (Angular). Su responsabilidad
-// dentro del flujo: el doctor revisa a SUS pacientes asignados y las
+// panel-doctor.ts — módulo individual de Alex (Angular).
+//  el doctor revisa a SUS pacientes asignados y las
 // evaluaciones que el módulo Vue escribió en Supabase (misma tabla
 // `evaluaciones`, filtrada por RLS), y deja una nota clínica.
 import { Component, OnInit, signal, computed } from '@angular/core';
