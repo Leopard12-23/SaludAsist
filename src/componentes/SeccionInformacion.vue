@@ -43,8 +43,8 @@
         </article>
         <article class="info-card">
           <div class="info-card-icon">🔒</div>
-          <h3>Privacidad 100% Local</h3>
-          <p>Procesamiento completamente local en tu dispositivo. Cero almacenamiento remoto. Sin tracking, sin cookies de terceros, sin análisis de comportamiento.</p>
+          <h3>Privacidad protegida por diseño</h3>
+          <p>Autenticación real y Row Level Security: solo tú (y tu doctor asignado) pueden ver tu historial. Sin tracking, sin cookies de terceros, sin análisis de comportamiento.</p>
         </article>
         <article class="info-card">
           <div class="info-card-icon">♿</div>

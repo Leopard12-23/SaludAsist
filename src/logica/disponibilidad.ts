@@ -1,22 +1,17 @@
-// disponibilidad.ts — guarda si un doctor está "disponible" o no,
-// por correo, para que se recuerde entre sesiones.
-const CLAVE = 'saludasist-disponibilidad';
+// disponibilidad.ts — si un doctor está "disponible" o no, contra la
+// columna `disponible` de la tabla compartida `perfiles` en Supabase.
+import { supabase } from '../almacenamiento/supabaseClient';
 
-function leerMapa(): Record<string, boolean> {
-  try { return JSON.parse(localStorage.getItem(CLAVE) ?? '{}'); } catch { return {}; }
-}
-
-// Devuelve true/false según el último estado guardado (por defecto: disponible).
-export function estaDisponible(correoDoctor: string): boolean {
-  const mapa = leerMapa();
-  return mapa[correoDoctor] ?? true;
+// Devuelve el estado de disponibilidad guardado (por defecto: disponible).
+export async function estaDisponible(correoDoctor: string): Promise<boolean> {
+  const { data } = await supabase.from('perfiles').select('disponible').eq('correo', correoDoctor).single();
+  return data?.disponible ?? true;
 }
 
 // Cambia el estado de disponibilidad de un doctor y lo guarda.
-export function alternarDisponibilidad(correoDoctor: string): boolean {
-  const mapa = leerMapa();
-  const nuevoEstado = !estaDisponible(correoDoctor);
-  mapa[correoDoctor] = nuevoEstado;
-  localStorage.setItem(CLAVE, JSON.stringify(mapa));
+export async function alternarDisponibilidad(correoDoctor: string): Promise<boolean> {
+  const actual = await estaDisponible(correoDoctor);
+  const nuevoEstado = !actual;
+  await supabase.from('perfiles').update({ disponible: nuevoEstado }).eq('correo', correoDoctor);
   return nuevoEstado;
 }

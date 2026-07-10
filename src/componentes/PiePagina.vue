@@ -8,7 +8,7 @@
       <div class="footer-main">
         <div class="footer-brand">
           <h4>SaludAsist</h4>
-          <p>Herramienta educativa de pre-diagnóstico médico con IA. Procesamiento 100% local, privado y seguro.</p>
+          <p>Herramienta educativa de pre-diagnóstico médico con IA. Backend seguro con Supabase (autenticación real y RLS).</p>
           <p class="footer-year">&copy; 2026 SaludAsist — Hecho con ❤️ en Manta, Ecuador</p>
         </div>
         <div class="footer-links">
@@ -26,7 +26,7 @@
       </div>
 
       <div class="footer-bottom">
-        <p>🔒 Privado • 🌐 100% Local • ⚡ Sin conexión • ✨ Sin cuentas</p>
+        <p>🔒 Autenticación real • 🌐 Backend compartido (Supabase) • 🛡️ RLS activado</p>
         <p class="footer-version">v2.0.0 (Vue) | Julio 2026</p>
       </div>
     </div>

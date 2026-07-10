@@ -3,7 +3,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
-import { obtenerSesion, cerrarSesion, sembrarCuentasDemo, asegurarAdminActivo, type Sesion } from './almacenamiento/cuentas-usuarios';
+import { obtenerSesion, cerrarSesion, type Sesion } from './almacenamiento/cuentas-usuarios';
 import { usarTema } from './logica/usar-tema';
 import { usarModalHistorial } from './logica/usar-modal-historial';
 import { usarInactividad } from './logica/usar-inactividad';
@@ -35,12 +35,11 @@ usarInactividad(() => {
 // historial solo tienen sentido en la pantalla del paciente.
 const esVistaPaciente = computed(() => route.name === 'paciente');
 
-// Al cargar la app: siembra las 3 cuentas demo (si no existen) y recupera
-// la sesión activa. El router (guarda de navegación) ya decidió a qué
-// ruta mandar según haya o no sesión; acá solo se refleja en el nav.
-onMounted(async () => {
-  await sembrarCuentasDemo();
-  asegurarAdminActivo();
+// Al cargar la app: recupera la sesión activa (ya restaurada por
+// restaurarSesionDesdeSupabase() en main.ts antes de montar el router).
+// El router (guarda de navegación) ya decidió a qué ruta mandar según
+// haya o no sesión; acá solo se refleja en el nav.
+onMounted(() => {
   sesion.value = obtenerSesion();
 });
 
@@ -106,7 +105,7 @@ function salir(): void {
           <li>🛡️ <strong>Administradores:</strong> gestionan usuarios y el sistema.</li>
         </ul>
         <div class="privacy-notice" role="complementary" aria-label="Aviso de privacidad">
-          🔒 Tus datos se procesan y almacenan de forma local en tu dispositivo.
+          🔒 Tus datos viajan cifrados y quedan protegidos con autenticación real (Supabase Auth + RLS).
         </div>
       </div>
       <ErrorBoundary><router-view /></ErrorBoundary>

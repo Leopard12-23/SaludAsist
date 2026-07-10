@@ -1,46 +1,47 @@
-// asignaciones.ts — qué paciente está asignado a qué doctor.
-// Relación simple: cada paciente tiene UN doctor asignado (o ninguno).
-// La asigna el administrador desde su panel.
-const CLAVE = 'saludasist-asignaciones';
-
-// Mapa guardado: correo del paciente -> correo del doctor asignado.
-function leerMapa(): Record<string, string> {
-  try { return JSON.parse(localStorage.getItem(CLAVE) ?? '{}'); } catch { return {}; }
-}
-function guardarMapa(mapa: Record<string, string>): void {
-  localStorage.setItem(CLAVE, JSON.stringify(mapa));
-}
+// asignaciones.ts — qué paciente está asignado a qué doctor, contra la
+// tabla compartida `asignaciones` de Supabase. Antes vivía en localStorage.
+import { supabase } from '../almacenamiento/supabaseClient';
 
 // Devuelve el correo del doctor asignado a un paciente, o null si no tiene.
-export function doctorAsignado(correoPaciente: string): string | null {
-  return leerMapa()[correoPaciente] ?? null;
+export async function doctorAsignado(correoPaciente: string): Promise<string | null> {
+  const { data: paciente } = await supabase.from('perfiles').select('id').eq('correo', correoPaciente).single();
+  if (!paciente) return null;
+  const { data } = await supabase.from('asignaciones').select('doctor_id').eq('paciente_id', paciente.id).single();
+  if (!data?.doctor_id) return null;
+  const { data: doctor } = await supabase.from('perfiles').select('correo').eq('id', data.doctor_id).single();
+  return doctor?.correo ?? null;
 }
 
 // Asigna (o cambia) el doctor de un paciente. Pasa cadena vacía para desasignar.
-export function asignarDoctor(correoPaciente: string, correoDoctor: string): void {
-  const mapa = leerMapa();
-  if (correoDoctor) mapa[correoPaciente] = correoDoctor;
-  else delete mapa[correoPaciente];
-  guardarMapa(mapa);
+export async function asignarDoctor(correoPaciente: string, correoDoctor: string): Promise<void> {
+  const { data: paciente } = await supabase.from('perfiles').select('id').eq('correo', correoPaciente).single();
+  if (!paciente) return;
+
+  if (!correoDoctor) {
+    await supabase.from('asignaciones').delete().eq('paciente_id', paciente.id);
+    return;
+  }
+  const { data: doctor } = await supabase.from('perfiles').select('id').eq('correo', correoDoctor).single();
+  if (!doctor) return;
+  await supabase.from('asignaciones').upsert({ paciente_id: paciente.id, doctor_id: doctor.id });
 }
 
 // Devuelve los correos de todos los pacientes asignados a un doctor puntual.
-// La usa VistaDoctor.vue para mostrar SOLO sus pacientes, no todos los del sistema.
-export function pacientesDeDoctor(correoDoctor: string): string[] {
-  const mapa = leerMapa();
-  return Object.keys(mapa).filter(correoPaciente => mapa[correoPaciente] === correoDoctor);
+export async function pacientesDeDoctor(correoDoctor: string): Promise<string[]> {
+  const { data: doctor } = await supabase.from('perfiles').select('id').eq('correo', correoDoctor).single();
+  if (!doctor) return [];
+  const { data: asignaciones } = await supabase.from('asignaciones').select('paciente_id').eq('doctor_id', doctor.id);
+  if (!asignaciones?.length) return [];
+  const { data: pacientes } = await supabase.from('perfiles').select('correo').in('id', asignaciones.map(a => a.paciente_id));
+  return (pacientes ?? []).map(p => p.correo);
 }
 
 // Limpia cualquier asignación relacionada a este correo: si era un
 // paciente, borra su asignación; si era un doctor, desasigna a todos sus
-// pacientes. Se usa cuando se elimina una cuenta o se le cambia el rol,
-// para no dejar asignaciones "huérfanas" apuntando a alguien que ya no
-// es doctor (o que ya no existe).
-export function limpiarAsignacionesDe(correo: string): void {
-  const mapa = leerMapa();
-  delete mapa[correo]; // por si era paciente
-  Object.keys(mapa).forEach(correoPaciente => {
-    if (mapa[correoPaciente] === correo) delete mapa[correoPaciente]; // por si era doctor
-  });
-  guardarMapa(mapa);
+// pacientes. Se usa cuando se elimina una cuenta o se le cambia el rol.
+export async function limpiarAsignacionesDe(correo: string): Promise<void> {
+  const { data: perfil } = await supabase.from('perfiles').select('id').eq('correo', correo).single();
+  if (!perfil) return;
+  await supabase.from('asignaciones').delete().eq('paciente_id', perfil.id);
+  await supabase.from('asignaciones').update({ doctor_id: null }).eq('doctor_id', perfil.id);
 }

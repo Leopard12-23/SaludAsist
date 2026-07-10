@@ -3,7 +3,7 @@
      graves recientes aparecen primero, y se ve la gravedad de un vistazo
      sin tener que abrir cada paciente uno por uno. -->
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import { obtenerSesion, listarUsuarios } from '../almacenamiento/cuentas-usuarios';
 import { pacientesDeDoctor } from '../logica/asignaciones';
 import { cargarHistorial, guardarNotaDoctor, type EvaluacionGuardada } from '../logica/historial-evaluaciones';
@@ -16,32 +16,48 @@ import ContenidoPerfil from '../componentes/ContenidoPerfil.vue';
 const sesion = obtenerSesion()!;
 const { notificar } = usarNotificaciones();
 
-const disponible = ref(estaDisponible(sesion.correo));
+const disponible = ref(true);
 const verPerfil = ref(false);
 const busqueda = ref('');
 const orden = ref<'urgencia' | 'nombre' | 'reciente'>('urgencia');
+const cargando = ref(true);
+
+interface PacienteConHistorial {
+  nombre: string; correo: string; rol: string; activo: boolean; especialidad?: string;
+  historial: EvaluacionGuardada[]; ultimaGravedad: Gravedad | null; ultimaFecha: string | null;
+}
+const pacientesConHistorial = ref<PacienteConHistorial[]>([]);
 
 // Solo los pacientes que el admin le asignó a ESTE doctor, con el
 // historial de cada uno ya cargado (para poder calcular estadísticas
-// y ordenar sin tener que abrir cada uno primero).
-const correosAsignados = pacientesDeDoctor(sesion.correo);
-const pacientesConHistorial = listarUsuarios('usuario')
-  .filter(p => correosAsignados.includes(p.correo))
-  .map(p => {
-    const historial = cargarHistorial(p.correo);
+// y ordenar sin tener que abrir cada uno primero). Todo esto vive en
+// Supabase (lo que escribió el paciente vía el módulo Vue, lo lee acá el doctor).
+async function cargarPanel(): Promise<void> {
+  cargando.value = true;
+  disponible.value = await estaDisponible(sesion.correo);
+  const correosAsignados = await pacientesDeDoctor(sesion.correo);
+  const usuarios = await listarUsuarios('usuario');
+  const asignados = usuarios.filter(p => correosAsignados.includes(p.correo));
+
+  pacientesConHistorial.value = await Promise.all(asignados.map(async (p) => {
+    const historial = await cargarHistorial(p.correo);
     const ultimaGravedad: Gravedad | null = historial[0]?.resultado?.gravedad ?? null;
     return { ...p, historial, ultimaGravedad, ultimaFecha: historial[0]?.fecha ?? null };
-  });
+  }));
+  cargando.value = false;
+}
+
+onMounted(cargarPanel);
 
 // Estadísticas rápidas para las tarjetas de arriba.
-const totalPacientes = pacientesConHistorial.length;
-const casosGraves = pacientesConHistorial.filter(p => p.ultimaGravedad === 'grave').length;
-const sinEvaluar = pacientesConHistorial.filter(p => p.historial.length === 0).length;
+const totalPacientes = computed(() => pacientesConHistorial.value.length);
+const casosGraves = computed(() => pacientesConHistorial.value.filter(p => p.ultimaGravedad === 'grave').length);
+const sinEvaluar = computed(() => pacientesConHistorial.value.filter(p => p.historial.length === 0).length);
 
 // Filtra por nombre/correo y además ordena según lo elegido.
 const pacientesFiltrados = computed(() => {
   const texto = busqueda.value.trim().toLowerCase();
-  let lista = pacientesConHistorial.filter(p =>
+  let lista = pacientesConHistorial.value.filter(p =>
     p.nombre.toLowerCase().includes(texto) || p.correo.toLowerCase().includes(texto)
   );
 
@@ -69,17 +85,17 @@ const notasEnEdicion = reactive<Record<string, string>>({});
 
 function alternarPaciente(correo: string): void {
   pacienteAbierto.value = pacienteAbierto.value === correo ? null : correo;
-  const paciente = pacientesConHistorial.find(p => p.correo === correo);
+  const paciente = pacientesConHistorial.value.find(p => p.correo === correo);
   paciente?.historial.forEach((ev: EvaluacionGuardada) => { notasEnEdicion[ev.id] = ev.notaDoctor ?? ''; });
 }
 
-function guardarNota(idEvaluacion: string): void {
-  guardarNotaDoctor(idEvaluacion, notasEnEdicion[idEvaluacion] ?? '');
+async function guardarNota(idEvaluacion: string): Promise<void> {
+  await guardarNotaDoctor(idEvaluacion, notasEnEdicion[idEvaluacion] ?? '');
   notificar('Nota guardada.', 'exito');
 }
 
-function cambiarDisponibilidad(): void {
-  disponible.value = alternarDisponibilidad(sesion.correo);
+async function cambiarDisponibilidad(): Promise<void> {
+  disponible.value = await alternarDisponibilidad(sesion.correo);
 }
 </script>
 
@@ -130,7 +146,8 @@ function cambiarDisponibilidad(): void {
       </select>
     </div>
 
-    <p v-if="totalPacientes === 0" class="empty-history">
+    <p v-if="cargando" class="empty-history">Cargando pacientes...</p>
+    <p v-else-if="totalPacientes === 0" class="empty-history">
       Todavía no tienes pacientes asignados. Pídele al administrador que te asigne alguno desde su panel.
     </p>
     <p v-else-if="pacientesFiltrados.length === 0" class="empty-history">No hay pacientes que coincidan con "{{ busqueda }}".</p>

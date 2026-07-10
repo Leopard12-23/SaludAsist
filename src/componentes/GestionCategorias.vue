@@ -1,19 +1,19 @@
 <!-- GestionCategorias.vue — el admin puede agregar una categoría nueva
-     al menú de síntomas, o agregar/quitar síntomas de una ya existente
-     (antes el menú de 10 categorías y 51 síntomas era fijo). -->
+     al menú de síntomas, o agregar/quitar síntomas de una ya existente. -->
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onMounted } from 'vue';
 import {
   obtenerCategorias, agregarCategoria, eliminarCategoria,
-  agregarSintoma, eliminarSintoma, restaurarCategoriasOriginales,
+  agregarSintoma, eliminarSintoma,
 } from '../logica/gestion-categorias';
 import { obtenerCatalogo } from '../logica/gestion-enfermedades';
 import { notificar } from '../logica/usar-notificaciones';
 import { usarConfirmacion } from '../logica/usar-confirmacion';
+import type { Categoria } from '../tipos/tipos';
 
 const { pedirConfirmacion } = usarConfirmacion();
 
-const categorias = ref(obtenerCategorias());
+const categorias = ref<Categoria[]>([]);
 
 // Campos para agregar una categoría nueva.
 const nombreCategoria = ref('');
@@ -22,16 +22,17 @@ const iconoCategoria = ref('🩺');
 // Campos para agregar un síntoma nuevo (por categoría, guardado por id).
 const textoNuevoSintoma = ref<Record<string, string>>({});
 
-function refrescar(): void {
-  categorias.value = obtenerCategorias();
+async function refrescar(): Promise<void> {
+  categorias.value = await obtenerCategorias();
 }
+onMounted(refrescar);
 
-function alAgregarCategoria(): void {
+async function alAgregarCategoria(): Promise<void> {
   if (!nombreCategoria.value.trim()) { notificar('Ponle un nombre a la categoría.', 'error'); return; }
-  agregarCategoria(nombreCategoria.value.trim(), iconoCategoria.value.trim() || '🩺');
+  await agregarCategoria(nombreCategoria.value.trim(), iconoCategoria.value.trim() || '🩺');
   nombreCategoria.value = '';
   iconoCategoria.value = '🩺';
-  refrescar();
+  await refrescar();
   notificar('Categoría agregada.', 'exito');
 }
 
@@ -39,15 +40,15 @@ function alAgregarCategoria(): void {
 // detectarse si se borra este síntoma (porque lo necesitan como
 // requerido). Sin esto, un borrado "silencioso" podía volver
 // inalcanzable una enfermedad sin que nadie se diera cuenta.
-function enfermedadesQueUsan(valorSintoma: string): string[] {
-  return obtenerCatalogo()
-    .filter(r => r.requeridos.includes(valorSintoma))
-    .map(r => r.enfermedad);
+async function enfermedadesQueUsan(valorSintoma: string): Promise<string[]> {
+  const catalogo = await obtenerCatalogo();
+  return catalogo.filter(r => r.requeridos.includes(valorSintoma)).map(r => r.enfermedad);
 }
 
 async function alBorrarCategoria(idCategoria: string, nombre: string): Promise<void> {
   const categoria = categorias.value.find(c => c.id === idCategoria);
-  const afectadas = new Set(categoria?.sintomas.flatMap(s => enfermedadesQueUsan(s.valor)) ?? []);
+  const afectadasPorSintoma = await Promise.all((categoria?.sintomas ?? []).map(s => enfermedadesQueUsan(s.valor)));
+  const afectadas = new Set(afectadasPorSintoma.flat());
 
   const mensaje = afectadas.size > 0
     ? `¿Borrar "${nombre}" y todos sus síntomas? ⚠️ Estas enfermedades dejarían de poder detectarse: ${[...afectadas].join(', ')}.`
@@ -55,38 +56,30 @@ async function alBorrarCategoria(idCategoria: string, nombre: string): Promise<v
 
   const confirma = await pedirConfirmacion(mensaje);
   if (!confirma) return;
-  eliminarCategoria(idCategoria);
-  refrescar();
+  await eliminarCategoria(idCategoria);
+  await refrescar();
   notificar('Categoría eliminada.', 'info');
 }
 
-function alAgregarSintoma(idCategoria: string): void {
+async function alAgregarSintoma(idCategoria: string): Promise<void> {
   const texto = textoNuevoSintoma.value[idCategoria]?.trim();
   if (!texto) { notificar('Escribe el nombre del síntoma primero.', 'error'); return; }
-  agregarSintoma(idCategoria, texto);
+  await agregarSintoma(idCategoria, texto);
   textoNuevoSintoma.value[idCategoria] = '';
-  refrescar();
+  await refrescar();
   notificar('Síntoma agregado.', 'exito');
 }
 
 async function alBorrarSintoma(idCategoria: string, valorSintoma: string, etiqueta: string): Promise<void> {
-  const afectadas = enfermedadesQueUsan(valorSintoma);
+  const afectadas = await enfermedadesQueUsan(valorSintoma);
   if (afectadas.length > 0) {
     const confirma = await pedirConfirmacion(
       `⚠️ "${etiqueta}" lo usa ${afectadas.join(', ')}. Si lo quitas, esa enfermedad ya no se podrá detectar. ¿Quitarlo igual?`
     );
     if (!confirma) return;
   }
-  eliminarSintoma(idCategoria, valorSintoma);
-  refrescar();
-}
-
-async function alRestaurar(): Promise<void> {
-  const confirma = await pedirConfirmacion('¿Descartar todos los cambios y volver a las 10 categorías / 51 síntomas originales?');
-  if (!confirma) return;
-  restaurarCategoriasOriginales();
-  refrescar();
-  notificar('Categorías restauradas a los valores originales.', 'info');
+  await eliminarSintoma(idCategoria, valorSintoma);
+  await refrescar();
 }
 </script>
 
@@ -117,8 +110,4 @@ async function alRestaurar(): Promise<void> {
       </div>
     </div>
   </div>
-
-  <button type="button" class="btn btn-secondary" style="margin-top:20px;" @click="alRestaurar">
-    ↩️ Restaurar categorías originales (10 categorías / 51 síntomas)
-  </button>
 </template>

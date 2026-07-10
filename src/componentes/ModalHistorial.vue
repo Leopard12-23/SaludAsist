@@ -8,22 +8,22 @@ import {
 const props = defineProps<{ abierto: boolean; correoUsuario: string }>();
 const emit = defineEmits<{ cerrar: [] }>();
 
-const historial = ref(cargarHistorial(props.correoUsuario));
+const historial = ref<Awaited<ReturnType<typeof cargarHistorial>>>([]);
 
 // Cada vez que se abre el modal, recarga el historial por si cambió.
-watch(() => props.abierto, (abierto) => { if (abierto) historial.value = cargarHistorial(props.correoUsuario); });
+watch(() => props.abierto, async (abierto) => { if (abierto) historial.value = await cargarHistorial(props.correoUsuario); }, { immediate: true });
 
 const stats = computed(() => calcularEstadisticas(historial.value));
 
 // Borra una sola evaluación y refresca la lista en pantalla.
-function borrarUna(id: string): void {
-  eliminarEvaluacion(id);
-  historial.value = cargarHistorial(props.correoUsuario);
+async function borrarUna(id: string): Promise<void> {
+  await eliminarEvaluacion(id);
+  historial.value = await cargarHistorial(props.correoUsuario);
 }
 
 // Borra todo el historial de esta cuenta (no el de las demás).
-function borrarTodo(): void {
-  limpiarHistorial(props.correoUsuario);
+async function borrarTodo(): Promise<void> {
+  await limpiarHistorial(props.correoUsuario);
   historial.value = [];
 }
 

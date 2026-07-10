@@ -1,53 +1,70 @@
-// gestion-enfermedades.ts — hace que el catálogo de enfermedades sea
-// EDITABLE desde la interfaz (antes era un archivo fijo que solo se podía
-// cambiar tocando código). El admin puede agregar, editar o borrar
-// enfermedades, y los cambios quedan guardados en este dispositivo.
-import { CATALOGO_BASE } from './catalogo-enfermedades';
+// gestion-enfermedades.ts — el catálogo de enfermedades (reglas de
+// diagnóstico), leído y editado contra la tabla compartida de Supabase
+// `reglas_diagnostico` (ver supabase/schema.sql). Antes vivía en localStorage.
+import { supabase } from '../almacenamiento/supabaseClient';
 import type { ReglaDiagnostico } from '../tipos/tipos';
 
-const CLAVE = 'saludasist-catalogo-enfermedades';
-
-function idAleatorio(): string {
-  return `regla-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+interface FilaSupabase {
+  id: string;
+  requeridos: string[];
+  opcionales: string[];
+  enfermedad: string;
+  probabilidad_base: number;
+  gravedad: ReglaDiagnostico['gravedad'];
+  derivacion: string;
+  descripcion: string;
+  recomendaciones: string[];
 }
 
-// Trae el catálogo actual. La primera vez que se usa, lo arma a partir
-// del catálogo base (semilla) y lo guarda para poder editarlo después.
-export function obtenerCatalogo(): ReglaDiagnostico[] {
-  try {
-    const guardado = localStorage.getItem(CLAVE);
-    if (guardado) return JSON.parse(guardado);
-  } catch {
-    // Si el JSON quedó corrupto, se regenera desde la semilla abajo.
-  }
+function aReglaDiagnostico(fila: FilaSupabase): ReglaDiagnostico {
+  return {
+    id: fila.id,
+    requeridos: fila.requeridos,
+    opcionales: fila.opcionales,
+    enfermedad: fila.enfermedad,
+    probabilidadBase: fila.probabilidad_base,
+    gravedad: fila.gravedad,
+    derivacion: fila.derivacion,
+    descripcion: fila.descripcion,
+    recomendaciones: fila.recomendaciones,
+  };
+}
 
-  const catalogoInicial: ReglaDiagnostico[] = CATALOGO_BASE.map(regla => ({ ...regla, id: idAleatorio() }));
-  localStorage.setItem(CLAVE, JSON.stringify(catalogoInicial));
-  return catalogoInicial;
+// Trae el catálogo completo de enfermedades (incluye lo agregado/editado por el admin).
+export async function obtenerCatalogo(): Promise<ReglaDiagnostico[]> {
+  const { data } = await supabase.from('reglas_diagnostico').select('*');
+  return (data ?? []).map(aReglaDiagnostico);
 }
 
 // Agrega una enfermedad nueva al catálogo.
-export function agregarEnfermedad(datos: Omit<ReglaDiagnostico, 'id'>): void {
-  const catalogo = obtenerCatalogo();
-  catalogo.push({ ...datos, id: idAleatorio() });
-  localStorage.setItem(CLAVE, JSON.stringify(catalogo));
+export async function agregarEnfermedad(datos: Omit<ReglaDiagnostico, 'id'>): Promise<void> {
+  await supabase.from('reglas_diagnostico').insert({
+    requeridos: datos.requeridos,
+    opcionales: datos.opcionales,
+    enfermedad: datos.enfermedad,
+    probabilidad_base: datos.probabilidadBase,
+    gravedad: datos.gravedad,
+    derivacion: datos.derivacion,
+    descripcion: datos.descripcion,
+    recomendaciones: datos.recomendaciones,
+  });
 }
 
 // Reemplaza los datos de una enfermedad existente (se mantiene el mismo id).
-export function editarEnfermedad(id: string, datos: Omit<ReglaDiagnostico, 'id'>): void {
-  const catalogo = obtenerCatalogo();
-  const indice = catalogo.findIndex(r => r.id === id);
-  if (indice !== -1) catalogo[indice] = { ...datos, id };
-  localStorage.setItem(CLAVE, JSON.stringify(catalogo));
+export async function editarEnfermedad(id: string, datos: Omit<ReglaDiagnostico, 'id'>): Promise<void> {
+  await supabase.from('reglas_diagnostico').update({
+    requeridos: datos.requeridos,
+    opcionales: datos.opcionales,
+    enfermedad: datos.enfermedad,
+    probabilidad_base: datos.probabilidadBase,
+    gravedad: datos.gravedad,
+    derivacion: datos.derivacion,
+    descripcion: datos.descripcion,
+    recomendaciones: datos.recomendaciones,
+  }).eq('id', id);
 }
 
 // Borra una enfermedad del catálogo por su id.
-export function eliminarEnfermedad(id: string): void {
-  const catalogo = obtenerCatalogo().filter(r => r.id !== id);
-  localStorage.setItem(CLAVE, JSON.stringify(catalogo));
-}
-
-// Descarta todos los cambios y vuelve a las 29 enfermedades originales.
-export function restaurarCatalogoOriginal(): void {
-  localStorage.removeItem(CLAVE);
+export async function eliminarEnfermedad(id: string): Promise<void> {
+  await supabase.from('reglas_diagnostico').delete().eq('id', id);
 }

@@ -17,9 +17,9 @@ function puntosPorEdad(enfermedad: string, gravedad: string, edad: number | null
 
 // Evalúa los síntomas y devuelve hasta 3 posibles diagnósticos, ordenados
 // del más al menos probable (antes solo devolvía el mejor, uno solo).
-export function evaluarSintomas(sintomasMarcados: string[], edad: number | null = null): ResultadoDiagnostico[] {
+export async function evaluarSintomas(sintomasMarcados: string[], edad: number | null = null): Promise<ResultadoDiagnostico[]> {
   const candidatos: Array<{ puntaje: number; resultado: ResultadoDiagnostico }> = [];
-  const catalogo = obtenerCatalogo(); // incluye enfermedades agregadas/editadas por el admin
+  const catalogo = await obtenerCatalogo(); // incluye enfermedades agregadas/editadas por el admin
 
   for (const regla of catalogo) {
     // Deben estar TODOS los síntomas requeridos para que la regla aplique.

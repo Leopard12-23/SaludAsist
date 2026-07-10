@@ -2,7 +2,7 @@
 // un solo archivo con v-if cambiando de "pantalla" sin cambiar la URL).
 // También protege las rutas: sin sesión no se puede entrar al sistema,
 // y cada rol solo puede ver su propia pantalla.
-import { createRouter, createWebHistory } from 'vue-router';
+import { createRouter, createWebHashHistory } from 'vue-router';
 import { obtenerSesion, type Rol } from '../almacenamiento/cuentas-usuarios';
 
 // Dado un rol, devuelve a qué ruta le corresponde entrar.
@@ -13,7 +13,11 @@ export function rutaInicioPorRol(rol: Rol): string {
 }
 
 const router = createRouter({
-  history: createWebHistory(),
+  // Hash routing (/vue/#/paciente): el módulo vive en una subcarpeta
+  // dentro de la contenedora; con hash el servidor estático nunca ve la
+  // ruta interna y no hace falta configurar redirects (ver instructivo §5).
+  // BASE_URL es '/' en dev y '/vue/' en el build (ver vite.config.ts).
+  history: createWebHashHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/', redirect: '/login' },
     {

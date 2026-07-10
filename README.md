@@ -1,96 +1,77 @@
-# 🩺 SaludAsist
+# 🩺 SaludAsist — Proyecto integrado (Hito Final / Demo Day)
 
-Sistema de pre-diagnóstico médico con IA basado en reglas, 100% local y privado. Construido con **Vue 3 + TypeScript + Vite**.
+**Grupo H — IS-403 Aplicaciones para el Cliente Web** · Adrian Omar Burgos Macias (Vue) · Alex Javier Alvarado Saltos (Angular)
+
+Sistema de pre-diagnóstico médico con IA basado en reglas. El paciente marca sus síntomas, recibe hasta 3 posibles diagnósticos con gravedad y derivación sugerida, y un doctor especialista revisa esas evaluaciones y deja una nota clínica.
 
 > ⚠️ **Aviso importante:** SaludAsist es una herramienta educativa. **No reemplaza una consulta médica profesional.** En una emergencia, llama al 911 o al servicio de emergencias de tu país.
 
 ---
 
-## ✨ Qué hace
+## 🔗 Producción
 
-- **Evaluación de síntomas interactiva**: un menú dinámico de 10 categorías (🫁 Respiratorio, 🧠 Neurológico, 🫃 Digestivo, ❤️ Cardiovascular, 🧘 Ánimo y sueño, entre otras) con 51 síntomas seleccionables. Al marcar una categoría se despliegan sus síntomas relacionados.
-- **Motor de diagnóstico** con 29 reglas: compara los síntomas marcados y devuelve hasta 3 posibles diagnósticos (el más probable primero), con gravedad, derivación sugerida y recomendaciones. La edad influye levemente en el resultado.
-- **3 roles con pantallas propias**, no solo botones distintos:
-  - 🩹 **Paciente**: evalúa síntomas, ve su propio historial, exporta a PDF, imprime.
-  - 🧑‍⚕️ **Doctor**: ve la lista de pacientes registrados, el historial de cada uno, y puede dejar una nota clínica por evaluación.
-  - 🛡️ **Administrador**: gestiona usuarios (cambia roles, activa/desactiva cuentas), asigna pacientes a doctores, **administra el catálogo de enfermedades** (agregar/editar/borrar), ve reportes del sistema, y puede exportar/restaurar un respaldo completo de los datos.
-- **Cuentas de usuario propias**: registro, login, recuperación de contraseña con código de 6 dígitos, límite de intentos fallidos, contraseñas con hash + salt (nunca en texto plano).
-- **Rutas reales** (Vue Router): `/login`, `/paciente`, `/doctor`, `/admin`, con guardas de navegación que redirigen según la sesión y el rol.
-- **Modales y avisos propios** (sin `alert()`/`confirm()` del navegador).
-- **Instalable como PWA** y funciona sin conexión (todo es local).
+- **App integrada:** _pendiente — pegar aquí la URL de Netlify/Vercel tras el deploy_
+- **Repositorio:** este mismo repo (monorepo del equipo)
 
-## 🔒 Sobre la privacidad (y sus límites, con honestidad)
+## 🧩 Quién construyó qué módulo
 
-Esta app **no tiene backend ni base de datos real**: todo se guarda en el `localStorage`/`sessionStorage` del navegador. Eso significa:
+| Módulo | Integrante | Responsabilidad dentro del flujo |
+|---|---|---|
+| **Contenedora** (`/contenedora`, vanilla-ts) | Equipo | Login real contra Supabase + menú que carga cada módulo en un iframe |
+| **Vue** (raíz del repo, `/vue` en el build) | Adrian Omar Burgos Macias | Paciente: evalúa síntomas, ve su historial · Administrador: usuarios, asignaciones, catálogo |
+| **Angular** (`/angular-doctor`, `/angular` en el build) | Alex Javier Alvarado Saltos | Doctor: revisa a sus pacientes asignados, lee las evaluaciones que escribió el módulo Vue, deja nota clínica, cambia su disponibilidad |
 
-- Tus datos nunca salen de tu dispositivo — no hay servidor que los reciba.
-- Pero también significa que **no es tan seguro como un sistema real con backend**. Cualquier persona con acceso técnico a tu navegador podría inspeccionar esos datos. El hashing de contraseñas, el límite de intentos, etc. siguen buenas prácticas, pero no sustituyen a un servidor con HTTPS, base de datos real y autenticación del lado del servidor.
-- Si se borra el navegador (o el `localStorage`), **se pierde todo**. Por eso existe la función de respaldo (exportar/importar `.json`) en el panel del administrador.
+Los tres viven bajo el **mismo origen** en el deploy final y comparten sesión a través de Supabase Auth (ver sección de arquitectura).
 
-## 🛠️ Stack técnico
-
-| Área | Tecnología |
-|---|---|
-| Framework | Vue 3 (`<script setup>`, Composition API) |
-| Lenguaje | TypeScript |
-| Build | Vite |
-| Routing | Vue Router 4 (rutas reales + guardas de navegación) |
-| Tests | Vitest + jsdom |
-| Lint | ESLint (flat config) + `eslint-plugin-vue` + `@typescript-eslint` |
-| Estilos | CSS con variables (sin frameworks externos) |
-| Exportar PDF | html2pdf.js (CDN) |
-
-## 📁 Estructura del proyecto
+## 🏗️ Arquitectura del deploy integrado
 
 ```
-src/
-├── almacenamiento/
-│   ├── cuentas-usuarios.ts       # Registro, login, sesión, roles
-│   └── cuentas-usuarios.test.ts  # Tests de lo anterior
-├── logica/
-│   ├── categorias.ts             # Las 10 categorías y 51 síntomas
-│   ├── catalogo-enfermedades.ts  # Las 29 reglas de diagnóstico "de fábrica" (semilla)
-│   ├── gestion-enfermedades.ts   # CRUD editable del catálogo (el admin agrega/edita/borra)
-│   ├── gestion-enfermedades.test.ts
-│   ├── motor-diagnostico.ts      # Compara síntomas → devuelve resultados
-│   ├── motor-diagnostico.test.ts # Tests del motor
-│   ├── asignaciones.ts           # Qué paciente tiene asignado qué doctor
-│   ├── historial-evaluaciones.ts # Guardar/leer evaluaciones por paciente
-│   ├── opciones-por-rol.ts       # Textos de cada rol
-│   ├── disponibilidad.ts         # Estado "disponible" del doctor
-│   ├── respaldo.ts               # Exportar/importar todos los datos
-│   ├── usar-tema.ts              # Claro/oscuro
-│   ├── usar-notificaciones.ts    # Toasts (reemplaza alert())
-│   └── usar-confirmacion.ts      # Modal de confirmación (reemplaza confirm())
-├── router/
-│   └── index.ts                  # Rutas + guarda de navegación por rol
-├── componentes/                  # Piezas reutilizables (modales, tarjetas, etc.)
-├── vistas/
-│   ├── VistaLogin.vue
-│   ├── VistaPaciente.vue
-│   ├── VistaDoctor.vue
-│   └── VistaAdmin.vue
-├── tipos/tipos.ts                # Tipos compartidos
-└── App.vue                       # Nav + <router-view>
+dist-integrado/
+├── index.html          ← contenedora (login + menú)
+├── vue/                ← build del módulo Vue (paciente + admin)
+└── angular/             ← build del módulo Angular (doctor)
 ```
 
-## 🚀 Cómo correrlo
+- **Un solo Supabase compartido** por todo el equipo (`supabase/schema.sql`): tablas `perfiles`, `categorias`, `sintomas`, `reglas_diagnostico`, `asignaciones`, `evaluaciones`, todas con **RLS activado** y políticas declaradas (quién puede leer/escribir cada una).
+- **Un solo login**: la contenedora autentica contra Supabase Auth (`supabase.auth.signInWithPassword`). Los módulos Vue y Angular, al vivir bajo el mismo origen, **heredan automáticamente esa misma sesión** porque `@supabase/supabase-js` la persiste en `localStorage` bajo una clave por proyecto (`sb-<ref>-auth-token`) — no hace falta pasarse tokens a mano entre módulos.
+- **Hash routing en los 3 módulos** (`/vue/#/paciente`, rutas de Angular con `withHashLocation()`): el servidor estático nunca ve la ruta interna, así que no hace falta configurar redirects.
+- **Prueba real de integración**: el paciente (Vue) guarda una evaluación en la tabla `evaluaciones`; el doctor (Angular) la lee — RLS permite esa lectura solo si el paciente está asignado a ese doctor (tabla `asignaciones`).
 
-Requiere Node 18 o superior.
+## 🚀 Cómo ejecutarlo localmente
 
+Requiere Node 18+ y una cuenta de Supabase (gratuita).
+
+### 1. Backend (una sola vez por equipo)
 ```bash
-npm install       # instala dependencias
-npm run dev       # servidor de desarrollo (http://localhost:5173)
-npm run build     # build de producción (carpeta dist/)
-npm run preview   # previsualizar el build de producción
-npm run test      # corre los tests una vez
-npm run test:watch  # tests en modo watch
-npm run lint      # revisa el código con ESLint
+# En el dashboard de Supabase: SQL Editor → pegar y correr supabase/schema.sql
+# Authentication → Providers → Email → desactivar "Confirm email" (no hay servidor de correo real)
+```
+
+### 2. Cada módulo por separado (desarrollo)
+```bash
+# Módulo Vue (raíz del repo)
+npm install
+cp .env.example .env.local   # completar VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY
+npm run dev                   # http://localhost:5173
+
+# Contenedora
+cd contenedora && npm install
+cp .env.example .env.local
+npm run dev                   # http://localhost:5175 (o el puerto libre)
+
+# Módulo Angular
+cd angular-doctor && npm install
+npm start                     # http://localhost:4200
+```
+En desarrollo cada uno corre en un puerto distinto (orígenes distintos), así que **no comparten sesión entre sí** todavía — eso solo pasa en el build integrado, donde los tres viven bajo el mismo origen.
+
+### 3. Build integrado (lo que se despliega)
+```bash
+npm run build:integrado   # construye los 3 proyectos y arma dist-integrado/
+npx vite preview --outDir dist-integrado --port 4600   # probarlo localmente
 ```
 
 ## 🔑 Cuentas de prueba
-
-Se crean automáticamente la primera vez que se abre la app:
 
 | Rol | Correo | Contraseña |
 |---|---|---|
@@ -98,20 +79,26 @@ Se crean automáticamente la primera vez que se abre la app:
 | 🧑‍⚕️ Doctor | `doctor@saludasist.com` | `Doctor123!` |
 | 🩹 Paciente | `paciente@saludasist.com` | `Paciente123!` |
 
-## 🌐 Despliegue
+## 🌐 Despliegue (Netlify / Vercel)
 
-La app usa `createWebHistory` (URLs limpias, sin `#`). Si la subes a un hosting estático, necesitas una regla de redirección para que refrescar en `/paciente` (por ejemplo) no dé error 404:
+- **Vercel**: ya incluye `vercel.json` con `buildCommand: npm run build:integrado` y `outputDirectory: dist-integrado`. Solo hay que configurar las variables de entorno `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` en el proyecto de Vercel.
+- **Netlify**: build command `npm run build:integrado`, publish directory `dist-integrado`, mismas variables de entorno.
 
-- **Netlify**: ya incluye `public/_redirects` con la regla lista.
-- **Vercel**: agrega un `vercel.json` con un rewrite a `/index.html`.
-- **GitHub Pages**: no soporta esto de forma nativa; considera usar `createWebHashHistory` en `src/router/index.ts` si vas a desplegar ahí.
+## 📸 Capturas
+
+_Pendiente: agregar 2-3 capturas (login, evaluación de síntomas, panel de doctor) antes de la entrega._
 
 ## 📌 Limitaciones conocidas (honestas)
 
-- El catálogo de 29 enfermedades cubre motivos de consulta frecuentes y señales de alarma — **no es una lista exhaustiva de todas las enfermedades existentes** (son decenas de miles).
-- El ajuste por edad en el motor de diagnóstico es una heurística simple, no un criterio médico riguroso.
-- No hay backend: dos personas usando el mismo navegador comparten el mismo `localStorage` (aunque el historial de evaluaciones sí está separado por cuenta).
+- **Resetear contraseña de otra cuenta** y **crear cuentas sin pasar por signUp** requieren la Admin API de Supabase (`service_role` key), que a propósito no se expone en el cliente — el panel de admin lo señala en vez de fingir que funciona.
+- **Borrar un usuario** solo borra su fila en `perfiles` (no la cuenta de `auth.users`, que requiere esa misma Admin API) — simplificación aceptada para este demo.
+- El catálogo de enfermedades cubre motivos de consulta frecuentes, no es una lista exhaustiva.
+- No hay suite de tests todavía contra el nuevo backend (los tests viejos probaban localStorage y se eliminaron al migrar — ver abajo).
 
-## 📄 Licencia
+## 📝 Decisiones y aprendizajes
 
-Proyecto educativo/de portafolio. Sin licencia comercial definida todavía.
+**Cómo dividimos los módulos:** el dominio (evaluación de síntomas, historial, catálogo, usuarios) ya existía completo en Vue de un hito anterior. En vez de partirlo a la mitad de forma artificial, dejamos ese dominio completo en Vue (paciente + administración) y construimos el panel de doctor **desde cero en Angular** como una superficie nueva y acotada que lee/escribe las mismas tablas de Supabase — así cada módulo tiene una responsabilidad clara dentro del mismo flujo, en vez de dos copias parciales de lo mismo.
+
+**El problema técnico más difícil:** migrar toda la capa de datos de un modelo síncrono basado en `localStorage` a Supabase asíncrono sin romper media docena de componentes que asumían que `listarUsuarios()`, `cargarHistorial()`, etc. devolvían el dato al instante. La parte más delicada fue **RLS**: diseñar políticas donde el doctor solo ve evaluaciones de sus pacientes asignados (vía un `exists` contra la tabla `asignaciones`) sin caer en recursión infinita al consultar `perfiles` desde su propia política — se resolvió con una función `security definer` (`rol_actual()`) que rompe ese ciclo.
+
+**Qué haríamos distinto:** empezar con Supabase desde la semana 1 en vez de construir todo el dominio contra `localStorage` primero y migrarlo después — la migración fue la parte más cara del proyecto. También escribiríamos los tests nuevos (mockeando el cliente de Supabase) antes de la entrega, no después.

@@ -4,9 +4,9 @@
      También permite crear directamente una cuenta de doctor especialista
      nueva (con su especialidad), sin pasar por el registro público. -->
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import {
-  listarUsuarios, cambiarRolUsuario, alternarActivoUsuario, resetearClave, eliminarUsuarioPermanente,
+  listarUsuarios, cambiarRolUsuario, alternarActivoUsuario, eliminarUsuarioPermanente,
   crearCuentaComoAdmin, actualizarEspecialidad, ESPECIALIDADES, type Rol,
 } from '../almacenamiento/cuentas-usuarios';
 import { limpiarAsignacionesDe } from '../logica/asignaciones';
@@ -18,8 +18,9 @@ const { pedirConfirmacion } = usarConfirmacion();
 
 // Lista reactiva: se vuelve a cargar cada vez que se cambia algo, para
 // que los botones reflejen el estado real al instante.
-const usuarios = ref(listarUsuarios(props.filtroRol));
-function recargar(): void { usuarios.value = listarUsuarios(props.filtroRol); }
+const usuarios = ref<Awaited<ReturnType<typeof listarUsuarios>>>([]);
+async function recargar(): Promise<void> { usuarios.value = await listarUsuarios(props.filtroRol); }
+onMounted(recargar);
 
 // Buscador: filtra por nombre o correo, en vivo.
 const busqueda = ref('');
@@ -54,53 +55,51 @@ async function alCrearDoctor(): Promise<void> {
   creandoDoctor.value = false;
   if (!res.ok) { notificar(res.error!, 'error'); return; }
   mostrarFormularioDoctor.value = false;
-  recargar();
+  await recargar();
   notificar(`Doctor creado. Contraseña temporal para ${normalizarMostrar(nuevoCorreo.value)}: ${res.claveTemporal} (avísale, no se vuelve a mostrar)`, 'exito');
 }
 
 function normalizarMostrar(correo: string): string { return correo.trim().toLowerCase(); }
 
 // El admin cambia la especialidad de un doctor ya existente.
-function alCambiarEspecialidad(correo: string, evento: Event): void {
-  actualizarEspecialidad(correo, (evento.target as HTMLSelectElement).value);
-  recargar();
+async function alCambiarEspecialidad(correo: string, evento: Event): Promise<void> {
+  await actualizarEspecialidad(correo, (evento.target as HTMLSelectElement).value);
+  await recargar();
   notificar('Especialidad actualizada.', 'exito');
 }
 
-function alCambiarRol(correo: string, evento: Event): void {
+async function alCambiarRol(correo: string, evento: Event): Promise<void> {
   const nuevoRol = (evento.target as HTMLSelectElement).value as Rol;
-  const res = cambiarRolUsuario(correo, nuevoRol);
-  if (!res.ok) { notificar(res.error!, 'error'); recargar(); return; } // recargar revierte el <select> a su valor real
+  const res = await cambiarRolUsuario(correo, nuevoRol);
+  if (!res.ok) { notificar(res.error!, 'error'); await recargar(); return; } // recargar revierte el <select> a su valor real
   // Si deja de ser doctor o paciente, cualquier asignación relacionada
   // a su correo anterior ya no tiene sentido (evita datos huérfanos).
-  limpiarAsignacionesDe(correo);
-  recargar();
+  await limpiarAsignacionesDe(correo);
+  await recargar();
   notificar('Rol actualizado.', 'exito');
 }
 
-function alAlternarActivo(correo: string): void {
-  const res = alternarActivoUsuario(correo);
+async function alAlternarActivo(correo: string): Promise<void> {
+  const res = await alternarActivoUsuario(correo);
   if (!res.ok) { notificar(res.error!, 'error'); return; }
-  recargar();
+  await recargar();
 }
 
-// Genera una contraseña temporal y se la muestra al admin para que se
-// la pase a la persona (es la única vez que se ve en texto plano).
-async function alResetearClave(correo: string): Promise<void> {
-  const confirma = await pedirConfirmacion(`¿Generar una contraseña temporal nueva para ${correo}?`);
-  if (!confirma) return;
-  const claveTemporal = await resetearClave(correo);
-  notificar(`Nueva contraseña para ${correo}: ${claveTemporal} (avísale, no se vuelve a mostrar)`, 'info');
+// Resetear contraseña de OTRA cuenta requiere la API de administración de
+// Supabase (service_role key), que a propósito no se expone en el cliente.
+// Simplificación aceptada para este demo: no disponible desde el panel.
+function alResetearClave(): void {
+  notificar('Resetear la contraseña de otra cuenta requiere una función de servidor con permisos de administrador (no disponible en este demo).', 'info');
 }
 
-// Borra la cuenta para siempre (distinto de "desactivar", que se puede revertir).
+// Borra el PERFIL para siempre (distinto de "desactivar", que se puede revertir).
 async function alEliminarUsuario(correo: string): Promise<void> {
   const confirma = await pedirConfirmacion(`¿Eliminar la cuenta de ${correo} para siempre? Esta acción no se puede deshacer.`);
   if (!confirma) return;
-  const res = eliminarUsuarioPermanente(correo);
+  const res = await eliminarUsuarioPermanente(correo);
   if (!res.ok) { notificar(res.error!, 'error'); return; }
-  limpiarAsignacionesDe(correo); // evita que quede una asignación apuntando a una cuenta que ya no existe
-  recargar();
+  await limpiarAsignacionesDe(correo); // evita que quede una asignación apuntando a una cuenta que ya no existe
+  await recargar();
   notificar('Cuenta eliminada.', 'info');
 }
 </script>
@@ -164,7 +163,7 @@ async function alEliminarUsuario(correo: string): Promise<void> {
       <button type="button" class="btn btn-secondary btn-sm" @click="alAlternarActivo(u.correo)">
         {{ u.activo ? '🚫 Desactivar' : '✅ Activar' }}
       </button>
-      <button type="button" class="btn btn-secondary btn-sm" @click="alResetearClave(u.correo)">
+      <button type="button" class="btn btn-secondary btn-sm" @click="alResetearClave()">
         🔑 Resetear contraseña
       </button>
       <button type="button" class="btn btn-danger btn-sm" @click="alEliminarUsuario(u.correo)">

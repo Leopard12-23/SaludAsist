@@ -1,7 +1,11 @@
 // cuentas-usuarios.ts
 // Todo lo relacionado a cuentas: registrar, iniciar sesión, cerrar sesión,
-// límite de intentos fallidos, y gestión de usuarios (para el admin).
-// Las contraseñas nunca se guardan en texto plano (se guardan con hash + salt).
+// y gestión de usuarios (para el admin). Antes esto vivía en localStorage
+// con hash PBKDF2 propio; ahora la autenticación real la hace Supabase Auth
+// (backend compartido del equipo) y el rol/especialidad/activo vive en la
+// tabla `perfiles` (ver supabase/schema.sql).
+import { createClient } from '@supabase/supabase-js';
+import { supabase } from './supabaseClient';
 
 export type Rol = 'administrador' | 'doctor' | 'usuario';
 
@@ -27,17 +31,6 @@ export const ESPECIALIDADES = [
 ] as const;
 export type Especialidad = typeof ESPECIALIDADES[number];
 
-export interface Usuario {
-  id: string;
-  nombre: string;
-  correo: string;
-  rol: Rol;
-  hash: string;
-  salt: string;
-  activo: boolean; // una cuenta desactivada no puede iniciar sesión
-  especialidad?: string; // solo aplica si rol === 'doctor'
-}
-
 export interface Sesion {
   id: string;
   nombre: string;
@@ -46,35 +39,7 @@ export interface Sesion {
   especialidad?: string;
 }
 
-const CLAVE_USUARIOS = 'saludasist-usuarios';
 const CLAVE_SESION = 'saludasist-sesion';
-const CLAVE_INTENTOS = 'saludasist-intentos-login';
-
-function aHex(buffer: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-function idAleatorio(): string {
-  const bytes = new Uint8Array(8);
-  crypto.getRandomValues(bytes);
-  return aHex(bytes.buffer);
-}
-
-// Deriva un hash seguro de la contraseña usando PBKDF2 (nunca texto plano).
-async function derivarHash(clave: string, saltHex: string): Promise<string> {
-  const saltBytes = new Uint8Array(saltHex.match(/.{2}/g)!.map(b => parseInt(b, 16)));
-  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(clave), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: saltBytes, iterations: 150000, hash: 'SHA-256' }, base, 256);
-  return aHex(bits);
-}
-
-function leerUsuarios(): Usuario[] {
-  try { return JSON.parse(localStorage.getItem(CLAVE_USUARIOS) ?? '[]'); } catch { return []; }
-}
-
-function guardarUsuarios(usuarios: Usuario[]): void {
-  localStorage.setItem(CLAVE_USUARIOS, JSON.stringify(usuarios));
-}
 
 export function normalizarCorreo(correo: string): string {
   return correo.trim().toLowerCase();
@@ -85,8 +50,6 @@ export function correoValido(correo: string): boolean {
 }
 
 // ── Fortaleza de contraseña ──────────────────────────────────
-// Se usa en el registro para mostrar una barra de fortaleza y
-// bloquear contraseñas demasiado débiles.
 export interface FortalezaClave { puntuacion: number; texto: string; valida: boolean }
 
 export function evaluarFortaleza(clave: string): FortalezaClave {
@@ -100,170 +63,146 @@ export function evaluarFortaleza(clave: string): FortalezaClave {
   return { puntuacion, texto: textos[puntuacion], valida: clave.length >= 8 };
 }
 
-// Registra un usuario nuevo. No permite crear administradores desde el formulario público.
-export async function registrar(nombre: string, correo: string, clave: string, rol: Rol, especialidad?: string): Promise<{ ok: boolean; error?: string }> {
-  const correoNorm = normalizarCorreo(correo);
-  if (!correoValido(correoNorm)) return { ok: false, error: 'Correo inválido.' };
-  if (rol === 'administrador') return { ok: false, error: 'No puedes registrarte como administrador.' };
-  if (rol === 'doctor' && !especialidad) return { ok: false, error: 'Selecciona tu especialidad.' };
-  const usuarios = leerUsuarios();
-  if (usuarios.some(u => u.correo === correoNorm)) return { ok: false, error: 'Ese correo ya está registrado.' };
-  if (!evaluarFortaleza(clave).valida) return { ok: false, error: 'La contraseña debe tener al menos 8 caracteres.' };
-
-  const saltBytes = new Uint8Array(16);
-  crypto.getRandomValues(saltBytes);
-  const salt = aHex(saltBytes.buffer);
-  const hash = await derivarHash(clave, salt);
-
-  usuarios.push({ id: idAleatorio(), nombre, correo: correoNorm, rol, hash, salt, activo: true, especialidad: rol === 'doctor' ? especialidad : undefined });
-  guardarUsuarios(usuarios);
-  return { ok: true };
-}
-
-// ── Límite de intentos de inicio de sesión (protege contra fuerza bruta) ──
-const MAX_INTENTOS = 5;
-const BLOQUEO_MINUTOS = 5;
-
-interface RegistroIntentos { intentos: number; bloqueadoHasta: number | null }
-
-function leerIntentos(): Record<string, RegistroIntentos> {
-  try { return JSON.parse(localStorage.getItem(CLAVE_INTENTOS) ?? '{}'); } catch { return {}; }
-}
-function guardarIntentos(registro: Record<string, RegistroIntentos>): void {
-  localStorage.setItem(CLAVE_INTENTOS, JSON.stringify(registro));
-}
-
-// Dice si un correo está bloqueado ahora mismo, y cuántos minutos faltan.
-function obtenerBloqueo(correo: string): { bloqueado: boolean; minutos: number } {
-  const registro = leerIntentos()[correo];
-  if (!registro?.bloqueadoHasta || Date.now() >= registro.bloqueadoHasta) return { bloqueado: false, minutos: 0 };
-  return { bloqueado: true, minutos: Math.ceil((registro.bloqueadoHasta - Date.now()) / 60000) };
-}
-
-// Suma un intento fallido; si llega al máximo, bloquea el correo por unos minutos.
-function registrarIntentoFallido(correo: string): void {
-  const registro = leerIntentos();
-  const actual = registro[correo] ?? { intentos: 0, bloqueadoHasta: null };
-  actual.intentos++;
-  if (actual.intentos >= MAX_INTENTOS) {
-    actual.bloqueadoHasta = Date.now() + BLOQUEO_MINUTOS * 60_000;
-    actual.intentos = 0;
-  }
-  registro[correo] = actual;
-  guardarIntentos(registro);
-}
-
-// Limpia el contador tras un login exitoso.
-function limpiarIntentos(correo: string): void {
-  const registro = leerIntentos();
-  delete registro[correo];
-  guardarIntentos(registro);
-}
-
-// Verifica correo/contraseña. Mensaje genérico para no revelar si el correo existe.
-export async function iniciarSesion(correo: string, clave: string): Promise<{ ok: boolean; sesion?: Sesion; error?: string }> {
-  const correoNorm = normalizarCorreo(correo);
-  const ERROR = 'Correo o contraseña incorrectos.';
-
-  const bloqueo = obtenerBloqueo(correoNorm);
-  if (bloqueo.bloqueado) return { ok: false, error: `Demasiados intentos. Espera ${bloqueo.minutos} minuto(s).` };
-
-  const usuario = leerUsuarios().find(u => u.correo === correoNorm);
-  if (!usuario) { registrarIntentoFallido(correoNorm); return { ok: false, error: ERROR }; }
-  if (!usuario.activo) return { ok: false, error: 'Esta cuenta fue desactivada. Contacta al administrador.' };
-
-  const hashIngresado = await derivarHash(clave, usuario.salt);
-  if (hashIngresado !== usuario.hash) { registrarIntentoFallido(correoNorm); return { ok: false, error: ERROR }; }
-
-  limpiarIntentos(correoNorm);
-  const sesion: Sesion = { id: usuario.id, nombre: usuario.nombre, correo: usuario.correo, rol: usuario.rol, especialidad: usuario.especialidad };
+// ── Sesión local (caché síncrona para el router y los componentes) ──
+// El router guard (router/index.ts) necesita leer la sesión de forma
+// SÍNCRONA antes de decidir a qué ruta dejar pasar, pero Supabase Auth es
+// asíncrono. Por eso se mantiene una copia en sessionStorage, poblada por
+// restaurarSesionDesdeSupabase() al arrancar la app (ver main.ts) y por
+// iniciarSesion() al loguearse.
+function guardarSesionLocal(sesion: Sesion, token: string): void {
   sessionStorage.setItem(CLAVE_SESION, JSON.stringify(sesion));
-  return { ok: true, sesion };
+  // token/usuario en localStorage: para que la contenedora y el módulo
+  // Angular (mismo origen, subcarpetas distintas) sepan quién tiene la
+  // sesión activa sin tener que volver a consultar Supabase.
+  localStorage.setItem('token', token);
+  localStorage.setItem('usuario', sesion.correo);
+}
+
+function limpiarSesionLocal(): void {
+  sessionStorage.removeItem(CLAVE_SESION);
+  localStorage.removeItem('token');
+  localStorage.removeItem('usuario');
 }
 
 export function obtenerSesion(): Sesion | null {
   try { return JSON.parse(sessionStorage.getItem(CLAVE_SESION) ?? 'null'); } catch { return null; }
 }
 
+// Cierra la sesión en Supabase y limpia la caché local. El signOut es
+// "fire and forget" (no se espera) porque los que llaman a esto
+// (App.vue, el temporizador de inactividad) no son funciones async.
 export function cerrarSesion(): void {
-  sessionStorage.removeItem(CLAVE_SESION);
+  limpiarSesionLocal();
+  void supabase.auth.signOut();
 }
 
-// Crea 3 cuentas de prueba (admin, doctor, paciente) la primera vez que se abre la app.
-export async function sembrarCuentasDemo(): Promise<void> {
-  if (leerUsuarios().length > 0) return;
-  await registrarComoSemilla('Administrador Demo', 'admin@saludasist.com', 'Admin123!', 'administrador');
-  await registrarComoSemilla('Doctora Demo', 'doctor@saludasist.com', 'Doctor123!', 'doctor', 'Médico General');
-  await registrarComoSemilla('Paciente Demo', 'paciente@saludasist.com', 'Paciente123!', 'usuario');
+// Se llama UNA vez al arrancar la app (antes de montar el router), para
+// que si ya había una sesión de Supabase activa (por ejemplo, porque el
+// login lo hizo la contenedora, o porque se recargó la página), la caché
+// síncrona quede lista antes de la primera navegación.
+export async function restaurarSesionDesdeSupabase(): Promise<void> {
+  const { data } = await supabase.auth.getSession();
+  const session = data.session;
+  if (!session) { limpiarSesionLocal(); return; }
+
+  const { data: perfil } = await supabase.from('perfiles').select('*').eq('id', session.user.id).single();
+  if (!perfil || !perfil.activo) {
+    await supabase.auth.signOut();
+    limpiarSesionLocal();
+    return;
+  }
+
+  guardarSesionLocal(
+    { id: perfil.id, nombre: perfil.nombre, correo: perfil.correo, rol: perfil.rol, especialidad: perfil.especialidad ?? undefined },
+    session.access_token,
+  );
 }
 
-// Red de seguridad: se llama cada vez que arranca la app (ver App.vue). Si
-// por lo que sea NINGÚN administrador quedó activo (por ejemplo, alguien
-// se desactivó por error antes de que existieran los candados de arriba),
-// reactiva automáticamente al administrador más antiguo para que el
-// sistema nunca quede sin nadie que pueda entrar al panel de admin.
-export function asegurarAdminActivo(): void {
-  const usuarios = leerUsuarios();
-  const admins = usuarios.filter(u => u.rol === 'administrador');
-  if (admins.length === 0) return; // no hay ningún admin creado todavía, nada que reparar
-  if (admins.some(u => u.activo)) return; // ya hay al menos uno activo, todo bien
+// Verifica correo/contraseña contra Supabase Auth. Mensaje genérico para
+// no revelar si el correo existe (mismo criterio que antes).
+export async function iniciarSesion(correo: string, clave: string): Promise<{ ok: boolean; sesion?: Sesion; error?: string }> {
+  const correoNorm = normalizarCorreo(correo);
+  const ERROR = 'Correo o contraseña incorrectos.';
 
-  admins[0].activo = true;
-  guardarUsuarios(usuarios);
+  const { data, error } = await supabase.auth.signInWithPassword({ email: correoNorm, password: clave });
+  if (error || !data.session) return { ok: false, error: ERROR };
+
+  const { data: perfil } = await supabase.from('perfiles').select('*').eq('id', data.user.id).single();
+  if (!perfil) { await supabase.auth.signOut(); return { ok: false, error: ERROR }; }
+  if (!perfil.activo) { await supabase.auth.signOut(); return { ok: false, error: 'Esta cuenta fue desactivada. Contacta al administrador.' }; }
+
+  const sesion: Sesion = { id: perfil.id, nombre: perfil.nombre, correo: perfil.correo, rol: perfil.rol, especialidad: perfil.especialidad ?? undefined };
+  guardarSesionLocal(sesion, data.session.access_token);
+  return { ok: true, sesion };
 }
 
-// Igual que registrar(), pero sí permite crear el admin (solo para la semilla inicial).
-async function registrarComoSemilla(nombre: string, correo: string, clave: string, rol: Rol, especialidad?: string): Promise<void> {
-  const saltBytes = new Uint8Array(16);
-  crypto.getRandomValues(saltBytes);
-  const salt = aHex(saltBytes.buffer);
-  const hash = await derivarHash(clave, salt);
-  const usuarios = leerUsuarios();
-  usuarios.push({ id: idAleatorio(), nombre, correo: normalizarCorreo(correo), rol, hash, salt, activo: true, especialidad });
-  guardarUsuarios(usuarios);
+// Registra un usuario nuevo. No permite crear administradores desde el
+// formulario público. Usa un cliente Supabase APARTE y descartable: si
+// usáramos el cliente compartido, signUp() reemplazaría la sesión de quien
+// esté logueado ahora mismo (ej. un admin creando cuentas) por la del
+// usuario recién creado.
+export async function registrar(nombre: string, correo: string, clave: string, rol: Rol, especialidad?: string): Promise<{ ok: boolean; error?: string }> {
+  const correoNorm = normalizarCorreo(correo);
+  if (!correoValido(correoNorm)) return { ok: false, error: 'Correo inválido.' };
+  if (rol === 'administrador') return { ok: false, error: 'No puedes registrarte como administrador.' };
+  if (rol === 'doctor' && !especialidad) return { ok: false, error: 'Selecciona tu especialidad.' };
+  if (!evaluarFortaleza(clave).valida) return { ok: false, error: 'La contraseña debe tener al menos 8 caracteres.' };
+
+  const clienteTemporal = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
+  const { error } = await clienteTemporal.auth.signUp({
+    email: correoNorm,
+    password: clave,
+    options: { data: { nombre, rol, especialidad: rol === 'doctor' ? especialidad : undefined } },
+  });
+  if (error) {
+    if (/registered|exists/i.test(error.message)) return { ok: false, error: 'Ese correo ya está registrado.' };
+    return { ok: false, error: error.message };
+  }
+  await clienteTemporal.auth.signOut();
+  return { ok: true };
 }
 
-// Devuelve la lista de usuarios registrados, SIN el hash ni el salt
-// (esos datos sensibles nunca deben llegar a la pantalla).
-export function listarUsuarios(filtroRol?: Rol): Array<{ nombre: string; correo: string; rol: Rol; activo: boolean; especialidad?: string }> {
-  return leerUsuarios()
-    .filter(u => !filtroRol || u.rol === filtroRol)
-    .map(u => ({ nombre: u.nombre, correo: u.correo, rol: u.rol, activo: u.activo, especialidad: u.especialidad }));
+// Devuelve la lista de usuarios registrados (perfiles), sin datos sensibles.
+export async function listarUsuarios(filtroRol?: Rol): Promise<Array<{ nombre: string; correo: string; rol: Rol; activo: boolean; especialidad?: string }>> {
+  let consulta = supabase.from('perfiles').select('nombre,correo,rol,activo,especialidad');
+  if (filtroRol) consulta = consulta.eq('rol', filtroRol);
+  const { data } = await consulta;
+  return data ?? [];
 }
 
-// Cuenta cuántos administradores activos quedan (para no dejar el
-// sistema sin nadie que pueda volver a entrar al panel de admin).
-function contarAdminsActivos(usuarios: Usuario[], excluirCorreo?: string): number {
-  return usuarios.filter(u => u.rol === 'administrador' && u.activo && u.correo !== excluirCorreo).length;
+// Cuenta cuántos administradores activos quedan (para no dejar el sistema
+// sin nadie que pueda volver a entrar al panel de admin).
+async function contarAdminsActivos(excluirCorreo?: string): Promise<number> {
+  let consulta = supabase.from('perfiles').select('correo', { count: 'exact', head: true }).eq('rol', 'administrador').eq('activo', true);
+  if (excluirCorreo) consulta = consulta.neq('correo', excluirCorreo);
+  const { count } = await consulta;
+  return count ?? 0;
 }
 
 // Cambia el rol de un usuario (ej: de paciente a doctor). Solo lo usa el admin.
-// No permite que el último administrador activo se quite el rol a sí mismo
-// (dejaría el sistema sin nadie que pueda administrar cuentas).
-export function cambiarRolUsuario(correo: string, nuevoRol: Rol): { ok: boolean; error?: string } {
-  const usuarios = leerUsuarios();
-  const usuario = usuarios.find(u => u.correo === correo);
+export async function cambiarRolUsuario(correo: string, nuevoRol: Rol): Promise<{ ok: boolean; error?: string }> {
+  const { data: usuario } = await supabase.from('perfiles').select('rol').eq('correo', correo).single();
   if (!usuario) return { ok: false, error: 'La cuenta ya no existe.' };
-  if (usuario.rol === 'administrador' && nuevoRol !== 'administrador' && contarAdminsActivos(usuarios, correo) === 0) {
+  if (usuario.rol === 'administrador' && nuevoRol !== 'administrador' && (await contarAdminsActivos(correo)) === 0) {
     return { ok: false, error: 'No puedes quitarle el rol de administrador a la última cuenta admin activa.' };
   }
-  usuario.rol = nuevoRol;
-  if (nuevoRol !== 'doctor') usuario.especialidad = undefined; // ya no aplica si deja de ser doctor
-  guardarUsuarios(usuarios);
+
+  const { error } = await supabase.from('perfiles')
+    .update({ rol: nuevoRol, especialidad: nuevoRol === 'doctor' ? usuario.rol : null })
+    .eq('correo', correo);
+  if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
 
 // El admin asigna o cambia la especialidad de una cuenta de doctor.
-export function actualizarEspecialidad(correo: string, especialidad: string): void {
-  const usuarios = leerUsuarios();
-  const usuario = usuarios.find(u => u.correo === correo);
-  if (usuario) { usuario.especialidad = especialidad; guardarUsuarios(usuarios); }
+export async function actualizarEspecialidad(correo: string, especialidad: string): Promise<void> {
+  await supabase.from('perfiles').update({ especialidad }).eq('correo', correo);
 }
 
 // El admin crea una cuenta directamente (ej: un doctor especialista nuevo)
 // sin pasar por el formulario público de registro. Genera una contraseña
-// temporal (igual que resetearClave) y la devuelve UNA sola vez para que
-// el admin se la comparta a la persona.
+// temporal y la devuelve UNA sola vez para que el admin se la pase a la
+// persona. Usa un cliente Supabase aparte por el mismo motivo que registrar().
 export async function crearCuentaComoAdmin(
   nombre: string, correo: string, rol: Rol, especialidad?: string,
 ): Promise<{ ok: boolean; error?: string; claveTemporal?: string }> {
@@ -271,147 +210,61 @@ export async function crearCuentaComoAdmin(
   if (!nombre.trim()) return { ok: false, error: 'Ingresa el nombre completo.' };
   if (!correoValido(correoNorm)) return { ok: false, error: 'Correo inválido.' };
   if (rol === 'doctor' && !especialidad) return { ok: false, error: 'Selecciona la especialidad del doctor.' };
-  const usuarios = leerUsuarios();
-  if (usuarios.some(u => u.correo === correoNorm)) return { ok: false, error: 'Ese correo ya está registrado.' };
 
   const claveTemporal = Math.random().toString(36).slice(2, 8) + 'A1!';
-  const saltBytes = new Uint8Array(16);
-  crypto.getRandomValues(saltBytes);
-  const salt = aHex(saltBytes.buffer);
-  const hash = await derivarHash(claveTemporal, salt);
-
-  usuarios.push({
-    id: idAleatorio(), nombre: nombre.trim(), correo: correoNorm, rol, hash, salt, activo: true,
-    especialidad: rol === 'doctor' ? especialidad : undefined,
+  const clienteTemporal = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
+  const { error } = await clienteTemporal.auth.signUp({
+    email: correoNorm,
+    password: claveTemporal,
+    options: { data: { nombre: nombre.trim(), rol, especialidad: rol === 'doctor' ? especialidad : undefined } },
   });
-  guardarUsuarios(usuarios);
+  if (error) {
+    if (/registered|exists/i.test(error.message)) return { ok: false, error: 'Ese correo ya está registrado.' };
+    return { ok: false, error: error.message };
+  }
+  await clienteTemporal.auth.signOut();
   return { ok: true, claveTemporal };
 }
 
-// Activa o desactiva una cuenta (una cuenta desactivada no puede iniciar sesión).
-// No te deja desactivar tu propia cuenta (evita quedar afuera del sistema
-// vos mismo/a), ni desactivar al último administrador activo que queda.
-export function alternarActivoUsuario(correo: string): { ok: boolean; error?: string } {
-  const usuarios = leerUsuarios();
-  const usuario = usuarios.find(u => u.correo === correo);
+// Activa o desactiva una cuenta (una cuenta desactivada no puede iniciar
+// sesión: iniciarSesion() revisa perfil.activo). No deja desactivar la
+// propia cuenta mientras tiene sesión abierta, ni al último admin activo.
+export async function alternarActivoUsuario(correo: string): Promise<{ ok: boolean; error?: string }> {
+  const { data: usuario } = await supabase.from('perfiles').select('rol,activo').eq('correo', correo).single();
   if (!usuario) return { ok: false, error: 'La cuenta ya no existe.' };
 
-  const vaADesactivarse = usuario.activo; // si está activo, esta acción lo va a desactivar
+  const vaADesactivarse = usuario.activo;
   const sesion = obtenerSesion();
   if (vaADesactivarse && sesion?.correo === correo) {
     return { ok: false, error: 'No puedes desactivar tu propia cuenta mientras tenés la sesión abierta.' };
   }
-  if (vaADesactivarse && usuario.rol === 'administrador' && contarAdminsActivos(usuarios, correo) === 0) {
+  if (vaADesactivarse && usuario.rol === 'administrador' && (await contarAdminsActivos(correo)) === 0) {
     return { ok: false, error: 'No puedes desactivar al último administrador activo del sistema.' };
   }
 
-  usuario.activo = !usuario.activo;
-  guardarUsuarios(usuarios);
+  const { error } = await supabase.from('perfiles').update({ activo: !usuario.activo }).eq('correo', correo);
+  if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
 
-// El admin genera una contraseña temporal nueva para un usuario (ej: si
-// la olvidó y no puede usar la recuperación por correo). Devuelve la
-// contraseña en texto plano UNA sola vez, para que el admin se la pase
-// a la persona — nunca vuelve a mostrarse ni a guardarse así.
-export async function resetearClave(correo: string): Promise<string> {
-  const claveTemporal = Math.random().toString(36).slice(2, 8) + 'A1!';
-  const saltBytes = new Uint8Array(16);
-  crypto.getRandomValues(saltBytes);
-  const salt = aHex(saltBytes.buffer);
-  const hash = await derivarHash(claveTemporal, salt);
-
-  const usuarios = leerUsuarios();
-  const usuario = usuarios.find(u => u.correo === correo);
-  if (usuario) { usuario.salt = salt; usuario.hash = hash; guardarUsuarios(usuarios); }
-  return claveTemporal;
-}
-
-// Borra una cuenta PARA SIEMPRE (a diferencia de desactivar, esto no se
-// puede deshacer). Quien llama a esto debe confirmar con la persona antes.
-// Mismos candados que alternarActivoUsuario: ni tu propia cuenta, ni el
-// último administrador activo.
-export function eliminarUsuarioPermanente(correo: string): { ok: boolean; error?: string } {
-  const usuarios = leerUsuarios();
-  const usuario = usuarios.find(u => u.correo === correo);
+// Borra el PERFIL de una cuenta para siempre (distinto de "desactivar").
+// Limitación aceptada para este demo: borrar la cuenta de auth.users
+// requiere la service_role key (API de administración), que no se expone
+// en el cliente; el perfil desaparece de todas las listas y ya no puede
+// operar en el sistema, aunque la fila de auth.users quede huérfana.
+export async function eliminarUsuarioPermanente(correo: string): Promise<{ ok: boolean; error?: string }> {
+  const { data: usuario } = await supabase.from('perfiles').select('rol,activo').eq('correo', correo).single();
   if (!usuario) return { ok: false, error: 'La cuenta ya no existe.' };
 
   const sesion = obtenerSesion();
   if (sesion?.correo === correo) {
     return { ok: false, error: 'No puedes eliminar tu propia cuenta mientras tenés la sesión abierta.' };
   }
-  if (usuario.rol === 'administrador' && usuario.activo && contarAdminsActivos(usuarios, correo) === 0) {
+  if (usuario.rol === 'administrador' && usuario.activo && (await contarAdminsActivos(correo)) === 0) {
     return { ok: false, error: 'No puedes eliminar al último administrador activo del sistema.' };
   }
 
-  guardarUsuarios(usuarios.filter(u => u.correo !== correo));
-  return { ok: true };
-}
-
-// Borra TODO lo guardado por la app en este dispositivo (usuarios, sesión,
-// historial, tema). Es irreversible, por eso quien llama a esto debe
-// confirmar con la persona antes.
-export function borrarTodosLosDatos(): void {
-  localStorage.clear();
-  sessionStorage.clear();
-}
-
-// ── Recuperación de contraseña (código de 6 dígitos, como un OTP) ──
-// Como no hay servidor de correo real, el código se "muestra" en la
-// pantalla (simulando el correo). Expira en 15 minutos y solo sirve una vez.
-
-const CLAVE_RESET = 'saludasist-reset-tokens';
-const DURACION_TOKEN_MS = 15 * 60_000;
-
-interface TokenReset { hash: string; salt: string; expiraEn: number }
-
-function leerTokens(): Record<string, TokenReset> {
-  try { return JSON.parse(localStorage.getItem(CLAVE_RESET) ?? '{}'); } catch { return {}; }
-}
-function guardarTokens(tokens: Record<string, TokenReset>): void {
-  localStorage.setItem(CLAVE_RESET, JSON.stringify(tokens));
-}
-
-// Genera un código de 6 dígitos para el correo dado. Si el correo no existe,
-// igual devuelve null sin avisar (para no revelar qué correos están registrados).
-export async function solicitarRecuperacion(correo: string): Promise<string | null> {
-  const correoNorm = normalizarCorreo(correo);
-  if (!leerUsuarios().some(u => u.correo === correoNorm)) return null;
-
-  const codigo = String(Math.floor(100000 + Math.random() * 900000));
-  const saltBytes = new Uint8Array(16);
-  crypto.getRandomValues(saltBytes);
-  const salt = aHex(saltBytes.buffer);
-  const hash = await derivarHash(codigo, salt);
-
-  const tokens = leerTokens();
-  tokens[correoNorm] = { hash, salt, expiraEn: Date.now() + DURACION_TOKEN_MS };
-  guardarTokens(tokens);
-  return codigo;
-}
-
-// Verifica el código ingresado y, si es correcto, cambia la contraseña.
-export async function confirmarRecuperacion(correo: string, codigo: string, nuevaClave: string): Promise<{ ok: boolean; error?: string }> {
-  const correoNorm = normalizarCorreo(correo);
-  const token = leerTokens()[correoNorm];
-  if (!token || Date.now() >= token.expiraEn) return { ok: false, error: 'El código expiró o no es válido. Solicita uno nuevo.' };
-
-  const hashIngresado = await derivarHash(codigo.trim(), token.salt);
-  if (hashIngresado !== token.hash) return { ok: false, error: 'El código ingresado es incorrecto.' };
-  if (!evaluarFortaleza(nuevaClave).valida) return { ok: false, error: 'La contraseña debe tener al menos 8 caracteres.' };
-
-  const usuarios = leerUsuarios();
-  const usuario = usuarios.find(u => u.correo === correoNorm);
-  if (!usuario) return { ok: false, error: 'La cuenta ya no existe.' };
-
-  const saltBytes = new Uint8Array(16);
-  crypto.getRandomValues(saltBytes);
-  usuario.salt = aHex(saltBytes.buffer);
-  usuario.hash = await derivarHash(nuevaClave, usuario.salt);
-  guardarUsuarios(usuarios);
-
-  const tokens = leerTokens();
-  delete tokens[correoNorm];
-  guardarTokens(tokens);
+  const { error } = await supabase.from('perfiles').delete().eq('correo', correo);
+  if (error) return { ok: false, error: error.message };
   return { ok: true };
 }

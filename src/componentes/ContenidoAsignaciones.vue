@@ -2,25 +2,36 @@
      qué doctor lo atiende. Antes cualquier doctor veía a todos los
      pacientes; ahora cada uno ve solo a los suyos. -->
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, reactive, onMounted } from 'vue';
 import { listarUsuarios } from '../almacenamiento/cuentas-usuarios';
 import { doctorAsignado, asignarDoctor } from '../logica/asignaciones';
 import { usarNotificaciones } from '../logica/usar-notificaciones';
 
 const { notificar } = usarNotificaciones();
 
-const pacientes = ref(listarUsuarios('usuario'));
-const doctores = listarUsuarios('doctor');
+const pacientes = ref<Awaited<ReturnType<typeof listarUsuarios>>>([]);
+const doctores = ref<Awaited<ReturnType<typeof listarUsuarios>>>([]);
+// Mapa correo del paciente -> correo del doctor asignado (o '' si ninguno).
+const asignadoA = reactive<Record<string, string>>({});
+
+onMounted(async () => {
+  pacientes.value = await listarUsuarios('usuario');
+  doctores.value = await listarUsuarios('doctor');
+  await Promise.all(pacientes.value.map(async (p) => {
+    asignadoA[p.correo] = (await doctorAsignado(p.correo)) ?? '';
+  }));
+});
 
 // Busca el nombre del doctor a partir de su correo, para mostrarlo bonito.
 function nombreDoctor(correo: string): string {
-  return doctores.find(d => d.correo === correo)?.nombre ?? correo;
+  return doctores.value.find(d => d.correo === correo)?.nombre ?? correo;
 }
 
 // Guarda el cambio de doctor asignado para un paciente puntual.
-function alCambiarDoctor(correoPaciente: string, evento: Event): void {
+async function alCambiarDoctor(correoPaciente: string, evento: Event): Promise<void> {
   const correoDoctor = (evento.target as HTMLSelectElement).value;
-  asignarDoctor(correoPaciente, correoDoctor);
+  await asignarDoctor(correoPaciente, correoDoctor);
+  asignadoA[correoPaciente] = correoDoctor;
   notificar(correoDoctor ? `Paciente asignado a ${nombreDoctor(correoDoctor)}.` : 'Paciente desasignado.', 'exito');
 }
 </script>
@@ -34,7 +45,7 @@ function alCambiarDoctor(correoPaciente: string, evento: Event): void {
   <div v-for="p in pacientes" :key="p.correo" class="history-item">
     <strong>{{ p.nombre }}</strong>
     <p class="history-symptoms">{{ p.correo }}</p>
-    <select :value="doctorAsignado(p.correo) ?? ''" class="form-select" style="width:auto" @change="alCambiarDoctor(p.correo, $event)">
+    <select :value="asignadoA[p.correo] ?? ''" class="form-select" style="width:auto" @change="alCambiarDoctor(p.correo, $event)">
       <option value="">Sin asignar</option>
       <option v-for="d in doctores" :key="d.correo" :value="d.correo">{{ d.nombre }}</option>
     </select>

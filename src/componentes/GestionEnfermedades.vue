@@ -3,9 +3,9 @@
      cambiar tocando código). Los cambios quedan guardados y el motor de
      diagnóstico los usa de inmediato. -->
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import {
-  obtenerCatalogo, agregarEnfermedad, editarEnfermedad, eliminarEnfermedad, restaurarCatalogoOriginal,
+  obtenerCatalogo, agregarEnfermedad, editarEnfermedad, eliminarEnfermedad,
 } from '../logica/gestion-enfermedades';
 import { obtenerCategorias } from '../logica/gestion-categorias';
 import { notificar } from '../logica/usar-notificaciones';
@@ -15,9 +15,13 @@ import type { ReglaDiagnostico, Gravedad, Categoria } from '../tipos/tipos';
 const { pedirConfirmacion } = usarConfirmacion();
 
 // Incluye las categorías/síntomas que haya agregado el admin, no solo los originales.
-const CATEGORIAS: Categoria[] = obtenerCategorias();
+const CATEGORIAS = ref<Categoria[]>([]);
 
-const catalogo = ref(obtenerCatalogo());
+const catalogo = ref<ReglaDiagnostico[]>([]);
+onMounted(async () => {
+  CATEGORIAS.value = await obtenerCategorias();
+  catalogo.value = await obtenerCatalogo();
+});
 const busqueda = ref('');
 const mostrarFormulario = ref(false);
 const idEnEdicion = ref<string | null>(null);
@@ -78,7 +82,7 @@ function abrirFormularioEditar(regla: ReglaDiagnostico): void {
 }
 
 // Valida y guarda (agrega o edita, según si idEnEdicion tiene valor).
-function guardar(): void {
+async function guardar(): Promise<void> {
   if (!nombre.value.trim()) { notificar('Ponle un nombre a la enfermedad.', 'error'); return; }
   if (requeridos.value.length === 0) { notificar('Marca al menos un síntoma requerido.', 'error'); return; }
 
@@ -94,14 +98,14 @@ function guardar(): void {
   };
 
   if (idEnEdicion.value) {
-    editarEnfermedad(idEnEdicion.value, datos);
+    await editarEnfermedad(idEnEdicion.value, datos);
     notificar('Enfermedad actualizada.', 'exito');
   } else {
-    agregarEnfermedad(datos);
+    await agregarEnfermedad(datos);
     notificar('Enfermedad agregada al catálogo.', 'exito');
   }
 
-  catalogo.value = obtenerCatalogo();
+  catalogo.value = await obtenerCatalogo();
   mostrarFormulario.value = false;
 }
 
@@ -109,19 +113,9 @@ function guardar(): void {
 async function borrar(regla: ReglaDiagnostico): Promise<void> {
   const confirma = await pedirConfirmacion(`¿Borrar "${regla.enfermedad}" del catálogo?`);
   if (!confirma) return;
-  eliminarEnfermedad(regla.id);
-  catalogo.value = obtenerCatalogo();
+  await eliminarEnfermedad(regla.id);
+  catalogo.value = await obtenerCatalogo();
   notificar('Enfermedad eliminada.', 'info');
-}
-
-// Descarta todos los cambios (agregados/editados/borrados) y vuelve a
-// las 29 enfermedades originales del sistema.
-async function restaurar(): Promise<void> {
-  const confirma = await pedirConfirmacion('¿Descartar todos los cambios y volver al catálogo original de 29 enfermedades?');
-  if (!confirma) return;
-  restaurarCatalogoOriginal();
-  catalogo.value = obtenerCatalogo();
-  notificar('Catálogo restaurado a los valores originales.', 'info');
 }
 </script>
 
@@ -146,10 +140,6 @@ async function restaurar(): Promise<void> {
         <button type="button" class="btn btn-danger btn-sm" @click="borrar(regla)">🗑️ Borrar</button>
       </div>
     </div>
-
-    <button type="button" class="btn btn-secondary" style="margin-top:20px;" @click="restaurar">
-      ↩️ Restaurar catálogo original (29 enfermedades)
-    </button>
   </div>
 
   <!-- Formulario de alta/edición -->

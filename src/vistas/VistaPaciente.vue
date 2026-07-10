@@ -29,14 +29,14 @@ const sinCoincidencia = ref(false);
 const verPerfil = ref(false);
 
 // Calcula los posibles diagnósticos (usando también la edad), los guarda
-// en el historial de ESTA cuenta y los muestra en pantalla.
-function evaluar(): void {
+// en el historial de ESTA cuenta (Supabase) y los muestra en pantalla.
+async function evaluar(): Promise<void> {
   if (sintomas.value.length === 0) return;
   const edadNum = edad.value ? parseInt(edad.value, 10) : null;
-  const encontrados = evaluarSintomas(sintomas.value, edadNum);
+  const encontrados = await evaluarSintomas(sintomas.value, edadNum);
   resultados.value = encontrados;
   sinCoincidencia.value = encontrados.length === 0;
-  guardarEvaluacion(sesion.correo, sintomas.value, encontrados[0] ?? null);
+  await guardarEvaluacion(sesion.correo, sintomas.value, encontrados[0] ?? null);
 }
 
 // Limpia el resultado y el menú de síntomas para empezar de nuevo.
@@ -91,7 +91,7 @@ function imprimir(): void {
             ⚠️ Esta herramienta <strong>no reemplaza</strong> una consulta médica profesional.
           </div>
           <div class="privacy-notice hero-disclaimer-inline" role="complementary" aria-label="Aviso de privacidad">
-            🔒 <strong>Tu privacidad es prioritaria:</strong> los datos se guardan solo en tu dispositivo.
+            🔒 <strong>Tu privacidad es prioritaria:</strong> solo tú y tu doctor asignado pueden ver tu historial (RLS activado).
           </div>
 
           <a href="#diagnostico" class="hero-cta">💊 Comenzar evaluación →</a>

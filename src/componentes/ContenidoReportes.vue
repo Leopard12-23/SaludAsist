@@ -1,12 +1,19 @@
 <!-- ContenidoReportes.vue — estadísticas generales del sistema (solo admin) -->
 <script setup lang="ts">
+import { ref, onMounted } from 'vue';
 import { listarUsuarios } from '../almacenamiento/cuentas-usuarios';
 import { calcularEstadisticasGlobales } from '../logica/historial-evaluaciones';
 
-const usuarios = listarUsuarios();
-const totalPacientes = usuarios.filter(u => u.rol === 'usuario').length;
-const totalDoctores = usuarios.filter(u => u.rol === 'doctor').length;
-const stats = calcularEstadisticasGlobales();
+const totalPacientes = ref(0);
+const totalDoctores = ref(0);
+const stats = ref({ total: 0, ultimaFecha: '—', sintomaFrecuente: '—' });
+
+onMounted(async () => {
+  const usuarios = await listarUsuarios();
+  totalPacientes.value = usuarios.filter(u => u.rol === 'usuario').length;
+  totalDoctores.value = usuarios.filter(u => u.rol === 'doctor').length;
+  stats.value = await calcularEstadisticasGlobales();
+});
 </script>
 
 <template>

@@ -5,13 +5,14 @@
      síntomas en vivo (útil con 51 síntomas en 10 categorías). Emite la
      lista completa de síntomas marcados hacia el componente padre. -->
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { obtenerCategorias } from '../logica/gestion-categorias';
 import type { Categoria } from '../tipos/tipos';
 
 // Se lee una sola vez al montar el componente: incluye las categorías y
 // síntomas que haya agregado el admin, no solo los 10/51 originales.
-const CATEGORIAS: Categoria[] = obtenerCategorias();
+const CATEGORIAS = ref<Categoria[]>([]);
+onMounted(async () => { CATEGORIAS.value = await obtenerCategorias(); });
 
 const emit = defineEmits<{ cambio: [sintomas: string[]] }>();
 
@@ -28,8 +29,8 @@ const busqueda = ref('');
 // síntoma cuya etiqueta coincide (y solo esos síntomas, no toda la categoría).
 const categoriasFiltradas = computed(() => {
   const texto = busqueda.value.trim().toLowerCase();
-  if (!texto) return CATEGORIAS;
-  return CATEGORIAS
+  if (!texto) return CATEGORIAS.value;
+  return CATEGORIAS.value
     .map(cat => ({ ...cat, sintomas: cat.sintomas.filter(s => s.etiqueta.toLowerCase().includes(texto)) }))
     .filter(cat => cat.sintomas.length > 0);
 });
@@ -59,7 +60,7 @@ const sintomasSeleccionados = computed(() =>
 
 // Cuenta cuántos síntomas hay marcados dentro de una categoría (para el badge).
 function contarEnCategoria(idCategoria: string): number {
-  const categoria = CATEGORIAS.find(c => c.id === idCategoria);
+  const categoria = CATEGORIAS.value.find(c => c.id === idCategoria);
   if (!categoria) return 0;
   return categoria.sintomas.filter(s => marcados.value[s.valor]).length;
 }
