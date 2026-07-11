@@ -18,10 +18,26 @@ Sistema de pre-diagnóstico médico con IA basado en reglas. El paciente marca s
 | Módulo | Integrante | Responsabilidad dentro del flujo |
 |---|---|---|
 | **Contenedora** (`/contenedora`, vanilla-ts) | Equipo | Login real contra Supabase + menú que carga cada módulo en un iframe |
-| **Vue** (raíz del repo, `/vue` en el build) | Adrian Omar Burgos Macias | Paciente: evalúa síntomas, ve su historial · Administrador: usuarios, asignaciones, catálogo |
-| **Angular** (`/angular-doctor`, `/angular` en el build) | Alex Javier Alvarado Saltos | Doctor: revisa a sus pacientes asignados, lee las evaluaciones que escribió el módulo Vue, deja nota clínica, cambia su disponibilidad |
+| **Vue** (`/vue`) | Adrian Omar Burgos Macias | Paciente: evalúa síntomas, ve su historial · Administrador: usuarios, asignaciones, catálogo |
+| **Angular** (`/angular`) | Alex Javier Alvarado Saltos | Doctor: revisa a sus pacientes asignados, lee las evaluaciones que escribió el módulo Vue, deja nota clínica, cambia su disponibilidad |
 
 Los tres viven bajo el **mismo origen** en el deploy final y comparten sesión a través de Supabase Auth (ver sección de arquitectura).
+
+## 📁 Estructura del repositorio
+
+Un módulo por carpeta, cada uno con su propio `package.json`; la raíz solo orquesta el build integrado.
+
+```
+/
+├── contenedora/    ← vanilla-ts: login + menú (iframe)
+├── vue/            ← paciente + administrador (Adrian)
+├── angular/        ← panel de doctor (Alex)
+├── supabase/       ← schema.sql (tablas + RLS + semilla)
+├── scripts/        ← build-integrado.mjs (arma dist-integrado/)
+├── docs/capturas/  ← screenshots para este README
+├── package.json    ← solo el script build:integrado
+└── vercel.json
+```
 
 ## 🏗️ Arquitectura del deploy integrado
 
@@ -49,8 +65,8 @@ Requiere Node 18+ y una cuenta de Supabase (gratuita).
 
 ### 2. Cada módulo por separado (desarrollo)
 ```bash
-# Módulo Vue (raíz del repo)
-npm install
+# Módulo Vue
+cd vue && npm install
 cp .env.example .env.local   # completar VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY
 npm run dev                   # http://localhost:5173
 
@@ -60,7 +76,7 @@ cp .env.example .env.local
 npm run dev                   # http://localhost:5175 (o el puerto libre)
 
 # Módulo Angular
-cd angular-doctor && npm install
+cd angular && npm install
 npm start                     # http://localhost:4200
 ```
 En desarrollo cada uno corre en un puerto distinto (orígenes distintos), así que **no comparten sesión entre sí** todavía — eso solo pasa en el build integrado, donde los tres viven bajo el mismo origen.
